@@ -40,7 +40,15 @@ export class ScreencastSession {
         this._target.callTarget('Runtime.evaluate', {
                 expression: '(window.innerWidth > 0 ? window.innerWidth : screen.width) + "," + (window.innerHeight > 0 ? window.innerHeight : screen.height) + "," + window.devicePixelRatio'
             }).then((msg) => {
-                const parts = msg.result.value.split(',');
+                var parts = [];
+                if (msg.result) {
+                    if (msg.result.value)
+                        parts = msg.result.value.split(',');
+                    else
+                        return
+                } else {
+                    parts = msg.split(',');
+                }
                 this._deviceWidth = parseInt(parts[0], 10);
                 this._deviceHeight = parseInt(parts[1], 10);
                 this._pageScaleFactor = parseInt(parts[2], 10);

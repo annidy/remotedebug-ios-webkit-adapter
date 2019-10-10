@@ -54,7 +54,10 @@ export class Target extends EventEmitter {
         });
 
         this._wsTarget.on('message', (message) => {
-            this.onMessageFromTarget(message);
+            if (this.isNewTargetMessage())
+                this.onNewMessageFromTarget(message);
+            else
+                this.onMessageFromTarget(message);
         });
         this._wsTarget.on('open', () => {
             debug(`Connection established to ${url}`);
@@ -165,7 +168,7 @@ export class Target extends EventEmitter {
         }
     }
 
-    private onMessageFromTarget(rawMessage: string): void {
+    private onNewMessageFromTarget(rawMessage: string): void {
         const data = JSON.parse(rawMessage);
 
         // target based
@@ -273,6 +276,77 @@ export class Target extends EventEmitter {
         }
     }
 
+    private onMessageFromTarget(rawMessage: string): void {
+        const msg = JSON.parse(rawMessage);
+
+        if ('id' in msg) {
+            if (this._toolRequestMap.has(msg.id)) {
+                // Reply to tool request
+                let eventName = `target::${this._toolRequestMap.get(msg.id)}`;
+                this.emit(eventName, msg.params);
+
+                this._toolRequestMap.delete(msg.id);
+
+                if ('error' in msg && this._messageFilters.has('target::error')) {
+                    eventName = 'target::error';
+                }
+
+                if (this._messageFilters.has(eventName)) {
+                    let sequence = Promise.resolve(msg);
+
+                    this._messageFilters.get(eventName).forEach((filter) => {
+                        sequence = sequence.then((filteredMessage) => {
+                            return filter(filteredMessage);
+                        });
+                    });
+
+                    sequence.then((filteredMessage) => {
+                        rawMessage = JSON.stringify(filteredMessage);
+                        this.sendToTools(rawMessage);
+                    });
+                } else {
+                    // Pass it on to the tools
+                    this.sendToTools(rawMessage);
+                }
+            } else if (this._adapterRequestMap.has(msg.id)) {
+                // Reply to adapter request
+                const resultPromise = this._adapterRequestMap.get(msg.id);
+                this._adapterRequestMap.delete(msg.id);
+
+                if ('result' in msg) {
+                    resultPromise.resolve(msg.result);
+                } else if ('error' in msg) {
+                    resultPromise.reject(msg.error);
+                } else {
+                    Logger.error(`Unhandled type of request message from target ${rawMessage}`);
+                }
+            } else {
+                Logger.error(`Unhandled message from target ${rawMessage}`);
+            }
+        } else {
+            const eventName = `target::${msg.method}`;
+            this.emit(eventName, msg);
+
+            if (this._messageFilters.has(eventName)) {
+                let sequence = Promise.resolve(msg);
+
+                this._messageFilters.get(eventName).forEach((filter) => {
+                    sequence = sequence.then((filteredMessage) => {
+                        return filter(filteredMessage);
+                    });
+                });
+
+                sequence.then((filteredMessage) => {
+                    rawMessage = JSON.stringify(filteredMessage);
+                    this.sendToTools(rawMessage);
+                });
+            } else {
+                // Pass it on to the tools
+                this.sendToTools(rawMessage);
+            }
+        }
+    }
+
     private sendToTools(rawMessage: string): void {
         debug(`sendToTools.${rawMessage}`);
         // Make sure the tools socket can receive messages
@@ -284,19 +358,21 @@ export class Target extends EventEmitter {
     private sendToTarget(rawMessage: string): void {
         debug(`sendToTarget.${rawMessage}`);
 
-        // target based
-        const request = JSON.parse(rawMessage);
-        request.params = {
-            id: request.id,
-            message: JSON.stringify({
+        if (this.isNewTargetMessage()) {
+            // target based
+            const request = JSON.parse(rawMessage);
+            request.params = {
                 id: request.id,
-                method: request.method,
-                params: request.params
-            }),
-            targetId: this._targetId
-        };
-        request.method = 'Target.sendMessageToTarget';
-        rawMessage = JSON.stringify(request);
+                message: JSON.stringify({
+                    id: request.id,
+                    method: request.method,
+                    params: request.params
+                }),
+                targetId: this._targetId
+            };
+            request.method = 'Target.sendMessageToTarget';
+            rawMessage = JSON.stringify(request);
+        }
 
         // Make sure the target socket can receive messages
         if (this.isSocketConnected(this._wsTarget)) {
@@ -310,5 +386,19 @@ export class Target extends EventEmitter {
 
     private isSocketConnected(ws: WebSocket): boolean {
         return ws && (ws.readyState === WebSocket.OPEN);
+    }
+
+    private isNewTargetMessage(): boolean {
+        const version = this.data.metadata.version;
+        const parts = version.split('.');
+        if (parts.length > 0) {
+            const major = parseInt(parts[0], 10);
+            const sub = parseInt(parts[1], 10);
+            if (major >= 12 && sub >= 2) {
+                // target based
+                return true
+            }
+        }
+        return false
     }
 }
