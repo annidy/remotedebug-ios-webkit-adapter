@@ -120,7 +120,7 @@ export class IOSAdapter extends AdapterCollection {
 
         // Check that the proxy exists
         const proxyPath = await IOSAdapter.getProxyPath();
-
+        
         // Start with remote debugging enabled
         // Use default parameters for the ios_webkit_debug_proxy executable
         const proxyPort = args.proxyPort;
@@ -141,6 +141,10 @@ export class IOSAdapter extends AdapterCollection {
     private static getProxyPath(): Promise<string> {
         debug(`iOSAdapter.getProxyPath`);
         return new Promise((resolve, reject) => {
+            if (process.env["ios_webkit_debug_proxy_path"]) {
+                resolve(process.env["ios_webkit_debug_proxy_path"])
+                return
+            }
             if (os.platform() === 'win32') {
                 const proxy = process.env.SCOOP ?
                 path.resolve(__dirname, process.env.SCOOP + '/apps/ios-webkit-debug-proxy/current/ios_webkit_debug_proxy.exe') :
@@ -167,6 +171,10 @@ export class IOSAdapter extends AdapterCollection {
     private static getDeviceInfoPath(): Promise<string> {
         debug(`iOSAdapter.getDeviceInfoPath`);
         return new Promise((resolve, reject) => {
+            if (process.env["ideviceinfo_path"]) {
+                resolve(process.env["ideviceinfo_path"])
+                return
+            }
             if (os.platform() === 'win32') {
                 const proxy = path.resolve(__dirname, process.env.USERPROFILE + '/AppData/Roaming/npm/node_modules/vs-libimobile/lib/ideviceinfo.exe');
                 try {
