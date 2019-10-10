@@ -53,9 +53,17 @@ export class AdapterCollection extends Adapter {
             this._adapters.forEach((adapter) => {
                 let targetMetadata = null;
                 if (metadata) {
-                    targetMetadata = (metadata.constructor === Array ? metadata[index] : metadata);
+                    if (metadata.constructor === Array) {
+                        if (index >= metadata.length)
+                            targetMetadata = metadata[metadata.length-1]
+                        else
+                            targetMetadata = metadata[index]
+                    } else {
+                        targetMetadata = metadata;
+                    }
                 }
-                promises.push(adapter.getTargets(targetMetadata));
+                if (targetMetadata)
+                    promises.push(adapter.getTargets(targetMetadata));
                 index++;
             });
 
