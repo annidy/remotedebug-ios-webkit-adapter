@@ -70,7 +70,10 @@ export class ProxyServer extends EventEmitter {
         }
 
         this.stopTargetFetcher();
-        this._adapter.stop();
+        if (this._adapter) {
+            this._adapter.stop();
+            this._adapter = null;
+        }
     }
 
     private startTargetFetcher(): void {
