@@ -18,6 +18,7 @@
     "@types/mocha": "^2.2.40",
     "@types/optimist": "0.0.29",
     "child-process-promise": "^2.2.0",
+    "compare-versions": "^3.5.1",
     "debug": "^2.6.3",
     "express": "^4.14.0",
     "optimist": "^0.6.1",

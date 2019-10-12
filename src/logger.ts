@@ -19,4 +19,5 @@ class LoggerUtil {
 }
 
 export const debug = createDebug('remotedebug')
+export const debug_protocol = createDebug('remotedebug-protocol')
 export const Logger = new LoggerUtil();

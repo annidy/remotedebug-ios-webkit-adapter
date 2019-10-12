@@ -4,8 +4,9 @@
 
 import * as WebSocket from 'ws';
 import { EventEmitter } from 'events';
-import { Logger, debug } from '../logger';
+import { Logger, debug, debug_protocol } from '../logger';
 import { ITarget } from '../adapters/adapterInterfaces';
+var compareVersions = require('compare-versions');
 
 export class Target extends EventEmitter {
     private _data: ITarget;
@@ -54,10 +55,20 @@ export class Target extends EventEmitter {
         });
 
         this._wsTarget.on('message', (message) => {
-            if (this.isNewTargetMessage())
-                this.onNewMessageFromTarget(message);
-            else
-                this.onMessageFromTarget(message);
+            const msg = JSON.parse(message);
+            switch (msg.method) {
+                case 'Target.targetCreated':
+                    this._targetId = msg.params.targetInfo.targetId;
+                    break;
+                case 'Target.dispatchMessageFromTarget':
+                    if (msg.params && msg.params.message) {
+                        message = msg.params.message;
+                    }
+                    this.onMessageFromTarget(message);
+                    break;
+                default:
+                    // ignore
+            }
         });
         this._wsTarget.on('open', () => {
             debug(`Connection established to ${url}`);
@@ -348,7 +359,7 @@ export class Target extends EventEmitter {
     }
 
     private sendToTools(rawMessage: string): void {
-        debug(`sendToTools.${rawMessage}`);
+        debug_protocol(`sendToTools.${rawMessage}`);
         // Make sure the tools socket can receive messages
         if (this.isSocketConnected(this._wsTools)) {
             this._wsTools.send(rawMessage);
@@ -356,9 +367,8 @@ export class Target extends EventEmitter {
     }
 
     private sendToTarget(rawMessage: string): void {
-        debug(`sendToTarget.${rawMessage}`);
-
-        if (this.isNewTargetMessage()) {
+        
+        if (this.isTargetBased()) {
             // target based
             const request = JSON.parse(rawMessage);
             request.params = {
@@ -373,7 +383,8 @@ export class Target extends EventEmitter {
             request.method = 'Target.sendMessageToTarget';
             rawMessage = JSON.stringify(request);
         }
-
+        
+        debug_protocol(`sendToTarget.${rawMessage}`);
         // Make sure the target socket can receive messages
         if (this.isSocketConnected(this._wsTarget)) {
             this._wsTarget.send(rawMessage);
@@ -388,17 +399,10 @@ export class Target extends EventEmitter {
         return ws && (ws.readyState === WebSocket.OPEN);
     }
 
-    private isNewTargetMessage(): boolean {
+    private isTargetBased(): boolean {
         const version = this.data.metadata.version;
-        const parts = version.split('.');
-        if (parts.length > 0) {
-            const major = parseInt(parts[0], 10);
-            const sub = parseInt(parts[1], 10);
-            if (major >= 12 && sub >= 2) {
-                // target based
-                return true
-            }
-        }
+        if (compareVersions(version, '12.2', '>='))
+            return true
         return false
     }
 }
