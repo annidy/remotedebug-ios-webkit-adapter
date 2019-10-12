@@ -56,27 +56,39 @@ export class Target extends EventEmitter {
 
         this._wsTarget.on('message', (message) => {
             const msg = JSON.parse(message);
-            switch (msg.method) {
-                case 'Target.targetCreated':
-                    this._targetId = msg.params.targetInfo.targetId;
-                    break;
-                case 'Target.dispatchMessageFromTarget':
-                    if (msg.params && msg.params.message) {
-                        message = msg.params.message;
-                    }
-                    this.onMessageFromTarget(message);
-                    break;
-                default:
-                    // ignore
+            debug_protocol(`onMessage.${message}`)
+            if (this.isTargetBased()) {
+                switch (msg.method) {
+                    case 'Target.targetCreated':
+                        this._targetId = msg.params.targetInfo.targetId;
+                        this._isConnected = true;	
+                        for (let i = 0; i < this._messageBuffer.length; i++) {	
+                            this.onMessageFromTools(this._messageBuffer[i]);	
+                        }	
+                        this._messageBuffer = [];
+                        break;
+                    case 'Target.dispatchMessageFromTarget':
+                        if (msg.params && msg.params.message) {
+                            message = msg.params.message;
+                        }
+                        this.onMessageFromTarget(message);
+                        break;
+                    default:
+                        // ignore
+                }
+            } else {
+                this.onMessageFromTarget(message)
             }
         });
         this._wsTarget.on('open', () => {
             debug(`Connection established to ${url}`);
-            this._isConnected = true;
-            for (let i = 0; i < this._messageBuffer.length; i++) {
-                this.onMessageFromTools(this._messageBuffer[i]);
+            if (!this.isTargetBased()) {
+                this._isConnected = true;
+                for (let i = 0; i < this._messageBuffer.length; i++) {
+                    this.onMessageFromTools(this._messageBuffer[i]);
+                }
+                this._messageBuffer = [];
             }
-            this._messageBuffer = [];
         });
         this._wsTarget.on('close', () => {
             debug('Socket is closed');
@@ -176,114 +188,6 @@ export class Target extends EventEmitter {
         } else {
             // Pass it on to the target
             this.sendToTarget(rawMessage);
-        }
-    }
-
-    private onNewMessageFromTarget(rawMessage: string): void {
-        const data = JSON.parse(rawMessage);
-
-        // target based
-        let message;
-        const originalMethod = data.method;
-        if (data.params && data.params.message) {
-            message = JSON.parse(data.params.message);
-            let params = message.params || data.params;
-            let result = data.result;
-
-            if (message.result) {
-                result = message.result;
-                if (message.result.result) {
-                    result = message.result.result;
-                    if (message.result.result.value) {
-                        result = message.result.result.value;
-                        // only at this level is parsing the result necessary
-                        if (typeof result === 'string') {
-                            try {
-                                result = JSON.parse(result);
-                            } catch (ign) {
-                            }
-                        }
-                    }
-                }
-            }
-            data.method = message.method;
-            data.error = message.error;
-            data.id = message.id;
-            data.params = params;
-            data.result = result;
-        }
-
-        if (data.id !== undefined && originalMethod === 'Target.dispatchMessageFromTarget') {
-            if (this._toolRequestMap.has(data.id)) {
-                // Reply to tool request
-                let eventName = `target::${this._toolRequestMap.get(data.id)}`;
-                this.emit(eventName, data.params);
-
-                this._toolRequestMap.delete(data.id);
-
-                if (data.error && this._messageFilters.has('target::error')) {
-                    eventName = 'target::error';
-                }
-
-                if (this._messageFilters.has(eventName)) {
-                    let sequence = Promise.resolve(data);
-
-                    this._messageFilters.get(eventName).forEach((filter) => {
-                        sequence = sequence.then((filteredMessage) => {
-                            return filter(filteredMessage);
-                        });
-                    });
-
-                    sequence.then((filteredMessage) => {
-                        rawMessage = JSON.stringify(filteredMessage);
-                        this.sendToTools(rawMessage);
-                    });
-                } else {
-                    // Pass it on to the tools
-                    rawMessage = JSON.stringify(data);
-                    this.sendToTools(rawMessage);
-                }
-            } else if (this._adapterRequestMap.has(data.id)) {
-                // Reply to adapter request
-                const resultPromise = this._adapterRequestMap.get(data.id);
-                this._adapterRequestMap.delete(data.id);
-
-                if ('result' in data) {
-                    resultPromise.resolve(data.result);
-                } else if ('error' in data) {
-                    resultPromise.reject(data.error);
-                } else {
-                    Logger.error(`Unhandled type of request message from target ${rawMessage}`);
-                }
-            } else {
-                Logger.error(`Unhandled message from target ${rawMessage}`);
-            }
-        } else if (data.method) {
-            const eventName = `target::${data.method}`;
-            this.emit(eventName, data);
-
-            if (originalMethod === 'Target.targetCreated') {
-                this._targetId = data.params.targetInfo.targetId;
-            }
-
-            if (this._messageFilters.has(eventName)) {
-                let sequence = Promise.resolve(data);
-
-                this._messageFilters.get(eventName).forEach((filter) => {
-                    sequence = sequence.then((filteredMessage) => {
-                        return filter(filteredMessage);
-                    });
-                });
-
-                sequence.then((filteredMessage) => {
-                    rawMessage = JSON.stringify(filteredMessage);
-                    this.sendToTools(rawMessage);
-                });
-            } else {
-                // Pass it on to the tools
-                rawMessage = JSON.stringify(data);
-                this.sendToTools(rawMessage);
-            }
         }
     }
 
@@ -401,7 +305,7 @@ export class Target extends EventEmitter {
 
     private isTargetBased(): boolean {
         const version = this.data.metadata.version;
-        if (compareVersions(version, '12.2', '>='))
+        if (compareVersions.compare(version, '12.2', '>='))
             return true
         return false
     }
