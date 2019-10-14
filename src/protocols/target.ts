@@ -304,6 +304,8 @@ export class Target extends EventEmitter {
     }
 
     private isTargetBased(): boolean {
+        if (this._data.type == 'WIRTypeJavaScript')
+            return false
         const version = this.data.metadata.version;
         if (compareVersions.compare(version, '12.2', '>='))
             return true
